@@ -30,7 +30,7 @@ app.get('/api/health', (req, res) => {
 // AI Feedback endpoint
 app.post('/api/feedback', async (req, res) => {
   try {
-    const { message, mode, conversationHistory } = req.body;
+    const { message, mode, conversationHistory, faceAnalysis } = req.body;
 
     if (!message || !mode) {
       return res.status(400).json({ 
@@ -45,14 +45,19 @@ app.post('/api/feedback', async (req, res) => {
       });
     }
 
-    // Create context-aware prompt based on mode
+    // Create context-aware prompt based on mode and include facial analysis
     const modePrompts = {
       introduction: "You are an expert communication coach specializing in professional introductions. Analyze the user's introduction and provide brief, constructive feedback (2-3 sentences) focusing on clarity, confidence, and professionalism. Be encouraging but specific about improvements.",
       seminar: "You are an expert presentation coach. Analyze the user's seminar content and provide brief, constructive feedback (2-3 sentences) focusing on clarity, engagement, and delivery. Be encouraging but specific about improvements.",
       interview: "You are an expert interview coach. Analyze the user's response and provide brief, constructive feedback (2-3 sentences) focusing on clarity, confidence, and how well they answer the question. Be encouraging but specific about improvements."
     };
 
-    const systemPrompt = modePrompts[mode] || modePrompts.introduction;
+    let systemPrompt = modePrompts[mode] || modePrompts.introduction;
+    
+    // Enhance prompt with facial analysis data if available
+    if (faceAnalysis) {
+      systemPrompt += ` Additionally, consider this visual analysis data: Eye Contact: ${faceAnalysis.eyeContact}%, Positivity: ${faceAnalysis.smile}%, Head Stability: ${faceAnalysis.headStability}%, Overall Confidence: ${faceAnalysis.confidence}%. Include brief feedback on their visual presentation and body language.`;
+    }
 
     // Build conversation context
     let conversationContext = '';
@@ -106,14 +111,25 @@ Provide specific, actionable feedback that helps improve their communication ski
   } catch (error) {
     console.error('Error generating feedback:', error.response?.data || error.message);
     
-    // Provide fallback response
+    // Provide fallback response with facial analysis if available
     const fallbackResponses = {
       introduction: "Great start! Focus on speaking clearly and confidently. Try to highlight your key strengths and what makes you unique. Practice maintaining eye contact and a warm, professional tone.",
       seminar: "Good presentation! Work on engaging your audience with clear, structured points. Consider adding more specific examples to illustrate your ideas. Remember to pace yourself and use pauses effectively.",
       interview: "Nice response! Be more specific with examples that demonstrate your skills. Show enthusiasm for the role and company. Practice answering with the STAR method (Situation, Task, Action, Result)."
     };
 
-    const fallbackFeedback = fallbackResponses[req.body.mode] || fallbackResponses.introduction;
+    let fallbackFeedback = fallbackResponses[req.body.mode] || fallbackResponses.introduction;
+    
+    // Add visual feedback to fallback if available
+    if (faceAnalysis) {
+      if (faceAnalysis.confidence >= 70) {
+        fallbackFeedback += " Your body language shows great confidence!";
+      } else if (faceAnalysis.eyeContact < 50) {
+        fallbackFeedback += " Try to maintain more direct eye contact with the camera.";
+      } else if (faceAnalysis.smile < 30) {
+        fallbackFeedback += " A gentle smile can help convey warmth and confidence.";
+      }
+    }
 
     res.json({ 
       feedback: fallbackFeedback,

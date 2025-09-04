@@ -1,8 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Send, Loader2, User, Bot, Mic } from 'lucide-react';
+import { ArrowLeft, Send, Loader2, User, Bot, Mic, Camera } from 'lucide-react';
 import axios from 'axios';
+import useSpeechRecognition from '../hooks/useSpeechRecognition';
+import useTextToSpeech from '../hooks/useTextToSpeech';
+import useFaceAnalysis from '../hooks/useFaceAnalysis';
+import VoiceControls from '../components/VoiceControls';
+import CameraControls from '../components/CameraControls';
+import LiveTranscript from '../components/LiveTranscript';
 
 const PracticeSession = () => {
   const navigate = useNavigate();
@@ -11,6 +17,11 @@ const PracticeSession = () => {
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef(null);
+
+  // Voice and Camera hooks
+  const speechRecognition = useSpeechRecognition();
+  const textToSpeech = useTextToSpeech();
+  const faceAnalysis = useFaceAnalysis();
 
   const modeConfig = {
     introduction: {
@@ -46,6 +57,14 @@ const PracticeSession = () => {
     scrollToBottom();
   }, [messages]);
 
+  // Handle voice transcript changes
+  useEffect(() => {
+    if (speechRecognition.transcript && !speechRecognition.isListening) {
+      setInputText(speechRecognition.transcript);
+      speechRecognition.resetTranscript();
+    }
+  }, [speechRecognition.transcript, speechRecognition.isListening]);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -65,10 +84,14 @@ const PracticeSession = () => {
     setIsLoading(true);
 
     try {
+      // Include facial analysis data if camera is active
+      const analysisData = faceAnalysis.isActive ? faceAnalysis.analysisData : null;
+      
       const response = await axios.post('http://localhost:5000/api/feedback', {
         message: inputText,
         mode: mode,
-        conversationHistory: messages.slice(-5) // Send last 5 messages for context
+        conversationHistory: messages.slice(-5), // Send last 5 messages for context
+        faceAnalysis: analysisData // Include facial analysis data
       });
 
       const aiMessage = {
@@ -79,6 +102,11 @@ const PracticeSession = () => {
       };
 
       setMessages(prev => [...prev, aiMessage]);
+
+      // Speak the AI response if TTS is supported
+      if (textToSpeech.isSupported) {
+        textToSpeech.speak(response.data.feedback);
+      }
     } catch (error) {
       console.error('Error getting feedback:', error);
       const errorMessage = {
@@ -136,9 +164,23 @@ const PracticeSession = () => {
               <p className="text-gray-400 text-sm">AI-powered communication coaching</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-gray-400">
-            <Mic className="w-5 h-5" />
-            <span className="text-sm">Text Mode</span>
+          <div className="flex items-center gap-4">
+            <VoiceControls
+              isListening={speechRecognition.isListening}
+              onStartListening={speechRecognition.startListening}
+              onStopListening={speechRecognition.stopListening}
+              isSpeaking={textToSpeech.isSpeaking}
+              onStopSpeaking={textToSpeech.stop}
+              isVoiceSupported={speechRecognition.isSupported}
+              isTTSSupported={textToSpeech.isSupported}
+            />
+            <div className="flex items-center gap-2 text-gray-400">
+              <div className="flex items-center gap-1">
+                <Mic className={`w-4 h-4 ${speechRecognition.isSupported ? 'text-green-400' : 'text-red-400'}`} />
+                <Camera className={`w-4 h-4 ${faceAnalysis.isSupported ? 'text-green-400' : 'text-red-400'}`} />
+              </div>
+              <span className="text-sm">Enhanced Mode</span>
+            </div>
           </div>
         </div>
       </motion.div>
@@ -146,6 +188,42 @@ const PracticeSession = () => {
       {/* Chat Area */}
       <div className="flex-1 overflow-hidden relative z-10">
         <div className="h-full max-w-4xl mx-auto flex flex-col">
+          {/* Camera Feed and Analysis Panel */}
+          {faceAnalysis.isActive && (
+            <div className="p-4 border-b border-white/10">
+              <div className="flex gap-4">
+                <div className="flex-shrink-0">
+                  <video
+                    ref={faceAnalysis.videoRef}
+                    className="w-48 h-36 rounded-lg bg-black border border-white/20"
+                    autoPlay
+                    muted
+                    playsInline
+                  />
+                </div>
+                <div className="flex-1">
+                  <CameraControls
+                    isActive={faceAnalysis.isActive}
+                    onStart={faceAnalysis.startAnalysis}
+                    onStop={faceAnalysis.stopAnalysis}
+                    isSupported={faceAnalysis.isSupported}
+                    analysisData={faceAnalysis.analysisData}
+                    confidenceMessage={faceAnalysis.getConfidenceMessage()}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Live Transcript */}
+          <div className="px-4">
+            <LiveTranscript
+              transcript={speechRecognition.transcript}
+              isListening={speechRecognition.isListening}
+              isVisible={speechRecognition.isListening || speechRecognition.transcript}
+            />
+          </div>
+
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             <AnimatePresence>
@@ -226,12 +304,26 @@ const PracticeSession = () => {
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder="Type your response here... (Press Enter to send, Shift+Enter for new line)"
+                  placeholder="Type your response here, use voice input, or enable camera analysis... (Press Enter to send, Shift+Enter for new line)"
                   className="w-full glass rounded-2xl p-4 text-white placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/50 min-h-[60px] max-h-[120px]"
                   rows="2"
                   disabled={isLoading}
                 />
               </div>
+              
+              {/* Camera Toggle (if not active) */}
+              {!faceAnalysis.isActive && faceAnalysis.isSupported && (
+                <motion.button
+                  onClick={faceAnalysis.startAnalysis}
+                  className="p-4 rounded-2xl bg-purple-500 hover:bg-purple-600 text-white transition-all duration-200"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  title="Enable camera analysis"
+                >
+                  <Camera className="w-5 h-5" />
+                </motion.button>
+              )}
+
               <motion.button
                 onClick={sendMessage}
                 disabled={!inputText.trim() || isLoading}
@@ -244,7 +336,7 @@ const PracticeSession = () => {
             </div>
             
             <p className="text-gray-400 text-xs mt-2 text-center">
-              Get personalized feedback on your clarity, confidence, and delivery
+              Enhanced with voice input, AI speech, and camera analysis for comprehensive feedback
             </p>
           </motion.div>
         </div>
